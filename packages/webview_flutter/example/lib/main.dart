@@ -42,10 +42,12 @@ class WebViewExample extends StatelessWidget {
           if (controller.hasData) {
             return FloatingActionButton(
               onPressed: () async {
-                final String url = await controller.data.currentUrl();
-                Scaffold.of(context).showSnackBar(
-                  SnackBar(content: Text("Favorited $url")),
-                );
+//                final String url = await controller.data.currentUrl();
+//                Scaffold.of(context).showSnackBar(
+//                  SnackBar(content: Text("Favorited $url")),
+//                );
+                Navigator.push(context,
+                    MaterialPageRoute<void>(builder: (ctx) => WebExample()));
               },
               child: const Icon(Icons.favorite),
             );
@@ -62,6 +64,7 @@ enum MenuOptions {
 
 class SampleMenu extends StatelessWidget {
   SampleMenu(this.controller);
+
   final Future<WebViewController> controller;
 
   @override
@@ -172,6 +175,62 @@ class NavigationControls extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+class WebExample extends StatefulWidget {
+  @override
+  State<StatefulWidget> createState() {
+    return WebExampleState();
+  }
+}
+
+class WebExampleState extends State<WebExample> {
+  final Completer<WebViewController> _controller =
+      Completer<WebViewController>();
+
+  WebViewController _webViewController;
+  bool isShowFloatBtn = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(),
+      body: WebView(
+        initialUrl: 'https://flutter.io',
+        javascriptMode: JavascriptMode.unrestricted,
+        onWebViewCreated: (WebViewController webViewController) {
+          _webViewController = webViewController;
+          _controller.complete(webViewController);
+          _webViewController.addListener(() {
+            int _scrollY = _webViewController.scrollY.toInt();
+            print("==========$_scrollY=====");
+            if (_scrollY < 480 && isShowFloatBtn) {
+              isShowFloatBtn = false;
+              setState(() {});
+            } else if (_scrollY > 480 && !isShowFloatBtn) {
+              isShowFloatBtn = true;
+              setState(() {});
+            }
+          });
+        },
+      ),
+      floatingActionButton: favoriteButton(),
+    );
+  }
+
+  Widget favoriteButton() {
+    if (_webViewController == null || _webViewController.scrollY < 480) {
+      return null;
+    }
+    return FloatingActionButton(
+      onPressed: () {
+        if (_webViewController != null) {
+          _webViewController.scrollTop();
+        }
+      },
+      child: const Icon(Icons.keyboard_arrow_up),
     );
   }
 }

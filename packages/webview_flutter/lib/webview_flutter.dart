@@ -177,14 +177,35 @@ class _WebSettings {
 ///
 /// A [WebViewController] instance can be obtained by setting the [WebView.onWebViewCreated]
 /// callback for a [WebView] widget.
-class WebViewController {
+class WebViewController extends ChangeNotifier {
   WebViewController._(int id, _WebSettings settings)
-      : _channel = MethodChannel('plugins.flutter.io/webview_$id'),
-        _settings = settings;
+      : _channel = MethodChannel('plugins.flutter.io/webview_$id') {
+    _settings = settings;
+    _channel.setMethodCallHandler(_handleMethodCall);
+  }
 
   final MethodChannel _channel;
 
   _WebSettings _settings;
+
+  double get scrollY => _scrollY;
+  double _scrollY;
+
+  Future<dynamic> _handleMethodCall(MethodCall call) async {
+    switch (call.method) {
+      case 'onScrollYChanged':
+        _scrollY = call.arguments['scrollY'];
+        notifyListeners();
+        break;
+      default:
+        throw MissingPluginException();
+    }
+  }
+
+  /// Reloads the current URL.
+  Future<void> scrollTop() async {
+    return _channel.invokeMethod("scrollTop");
+  }
 
   /// Loads the specified URL.
   ///
