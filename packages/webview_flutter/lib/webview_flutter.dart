@@ -189,7 +189,7 @@ class WebViewController extends ChangeNotifier {
   _WebSettings _settings;
 
   double get scrollY => _scrollY;
-  double _scrollY;
+  double _scrollY = 0;
 
   Future<dynamic> _handleMethodCall(MethodCall call) async {
     switch (call.method) {
