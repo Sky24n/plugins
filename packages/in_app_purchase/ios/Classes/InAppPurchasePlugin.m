@@ -5,6 +5,7 @@
 #import "InAppPurchasePlugin.h"
 #import <StoreKit/StoreKit.h>
 #import "FIAObjectTranslator.h"
+#import "FIAPReceiptManager.h"
 #import "FIAPRequestHandler.h"
 #import "FIAPaymentQueueHandler.h"
 
@@ -24,6 +25,8 @@
 @property(strong, nonatomic) NSObject<FlutterBinaryMessenger> *messenger;
 @property(strong, nonatomic) NSObject<FlutterPluginRegistrar> *registrar;
 
+@property(strong, nonatomic) FIAPReceiptManager *receiptManager;
+
 @end
 
 @implementation InAppPurchasePlugin
@@ -36,11 +39,18 @@
   [registrar addMethodCallDelegate:instance channel:channel];
 }
 
-- (instancetype)initWithRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
+- (instancetype)initWithReceiptManager:(FIAPReceiptManager *)receiptManager {
   self = [self init];
+  self.receiptManager = receiptManager;
+  return self;
+}
+
+- (instancetype)initWithRegistrar:(NSObject<FlutterPluginRegistrar> *)registrar {
+  self = [self initWithReceiptManager:[FIAPReceiptManager new]];
   self.registrar = registrar;
   self.registry = [registrar textures];
   self.messenger = [registrar messenger];
+
   __weak typeof(self) weakSelf = self;
   self.paymentQueueHandler =
       [[FIAPaymentQueueHandler alloc] initWithQueue:[SKPaymentQueue defaultQueue]
@@ -77,6 +87,12 @@
     [self addPayment:call result:result];
   } else if ([@"-[InAppPurchasePlugin finishTransaction:result:]" isEqualToString:call.method]) {
     [self finishTransaction:call result:result];
+  } else if ([@"-[InAppPurchasePlugin restoreTransactions:result:]" isEqualToString:call.method]) {
+    [self restoreTransactions:call result:result];
+  } else if ([@"-[InAppPurchasePlugin retrieveReceiptData:result:]" isEqualToString:call.method]) {
+    [self retrieveReceiptData:call result:result];
+  } else if ([@"-[InAppPurchasePlugin refreshReceipt:result:]" isEqualToString:call.method]) {
+    [self refreshReceipt:call result:result];
   } else {
     result(FlutterMethodNotImplemented);
   }
@@ -102,12 +118,9 @@
   [handler startProductRequestWithCompletionHandler:^(SKProductsResponse *_Nullable response,
                                                       NSError *_Nullable error) {
     if (error) {
-      NSString *details = [NSString stringWithFormat:@"Reason:%@\nRecoverSuggestion:%@",
-                                                     error.localizedFailureReason,
-                                                     error.localizedRecoverySuggestion];
       result([FlutterError errorWithCode:@"storekit_getproductrequest_platform_error"
-                                 message:error.description
-                                 details:details]);
+                                 message:error.localizedDescription
+                                 details:error.description]);
       return;
     }
     if (!response) {
@@ -193,6 +206,61 @@
   result(nil);
 }
 
+- (void)restoreTransactions:(FlutterMethodCall *)call result:(FlutterResult)result {
+  if (call.arguments && ![call.arguments isKindOfClass:[NSString class]]) {
+    result([FlutterError
+        errorWithCode:@"storekit_invalid_argument"
+              message:@"Argument is not nil and the type of finishTransaction is not a string."
+              details:call.arguments]);
+    return;
+  }
+  [self.paymentQueueHandler restoreTransactions:call.arguments];
+}
+
+- (void)retrieveReceiptData:(FlutterMethodCall *)call result:(FlutterResult)result {
+  FlutterError *error = nil;
+  NSString *receiptData = [self.receiptManager retrieveReceiptWithError:&error];
+  if (error) {
+    result(error);
+    return;
+  }
+  result(receiptData);
+}
+
+- (void)refreshReceipt:(FlutterMethodCall *)call result:(FlutterResult)result {
+  NSDictionary *arguments = call.arguments;
+  SKReceiptRefreshRequest *request;
+  if (arguments) {
+    if (![arguments isKindOfClass:[NSDictionary class]]) {
+      result([FlutterError errorWithCode:@"storekit_invalid_argument"
+                                 message:@"Argument type of startRequest is not array"
+                                 details:call.arguments]);
+      return;
+    }
+    NSMutableDictionary *properties = [NSMutableDictionary new];
+    properties[SKReceiptPropertyIsExpired] = arguments[@"isExpired"];
+    properties[SKReceiptPropertyIsRevoked] = arguments[@"isRevoked"];
+    properties[SKReceiptPropertyIsVolumePurchase] = arguments[@"isVolumePurchase"];
+    request = [self getRefreshReceiptRequest:properties];
+  } else {
+    request = [self getRefreshReceiptRequest:nil];
+  }
+  FIAPRequestHandler *handler = [[FIAPRequestHandler alloc] initWithRequest:request];
+  [self.requestHandlers addObject:handler];
+  __weak typeof(self) weakSelf = self;
+  [handler startProductRequestWithCompletionHandler:^(SKProductsResponse *_Nullable response,
+                                                      NSError *_Nullable error) {
+    if (error) {
+      result([FlutterError errorWithCode:@"storekit_refreshreceiptrequest_platform_error"
+                                 message:error.localizedDescription
+                                 details:error.description]);
+      return;
+    }
+    result(nil);
+    [weakSelf.requestHandlers removeObject:handler];
+  }];
+}
+
 #pragma mark - delegates
 
 - (void)handleTransactionsUpdated:(NSArray<SKPaymentTransaction *> *)transactions {
@@ -212,10 +280,8 @@
 }
 
 - (void)handleTransactionRestoreFailed:(NSError *)error {
-  FlutterError *fltError = [FlutterError errorWithCode:error.domain
-                                               message:error.description
-                                               details:error.description];
-  [self.callbackChannel invokeMethod:@"restoreCompletedTransactions" arguments:fltError];
+  [self.callbackChannel invokeMethod:@"restoreCompletedTransactionsFailed"
+                           arguments:[FIAObjectTranslator getMapFromNSError:error]];
 }
 
 - (void)restoreCompletedTransactionsFinished {
@@ -224,11 +290,7 @@
 }
 
 - (void)updatedDownloads:(NSArray<SKDownload *> *)downloads {
-  NSMutableArray *maps = [NSMutableArray new];
-  for (SKDownload *download in downloads) {
-    [maps addObject:[FIAObjectTranslator getMapFromSKDownload:download]];
-  }
-  [self.callbackChannel invokeMethod:@"updatedDownloads" arguments:maps];
+  NSLog(@"Received an updatedDownloads callback, but downloads are not supported.");
 }
 
 - (BOOL)shouldAddStorePayment:(SKPayment *)payment product:(SKProduct *)product {
@@ -252,6 +314,10 @@
 
 - (SKProduct *)getProduct:(NSString *)productID {
   return [self.productsCache objectForKey:productID];
+}
+
+- (SKReceiptRefreshRequest *)getRefreshReceiptRequest:(NSDictionary *)properties {
+  return [[SKReceiptRefreshRequest alloc] initWithReceiptProperties:properties];
 }
 
 #pragma mark - getter

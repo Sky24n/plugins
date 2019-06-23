@@ -303,7 +303,6 @@ void main() {
         textDirection: TextDirection.ltr,
         child: GoogleMap(
           initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
-          trackCameraPosition: false,
         ),
       ),
     );
@@ -314,11 +313,12 @@ void main() {
     expect(platformGoogleMap.trackCameraPosition, false);
 
     await tester.pumpWidget(
-      const Directionality(
+      Directionality(
         textDirection: TextDirection.ltr,
         child: GoogleMap(
-          initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
-          trackCameraPosition: true,
+          initialCameraPosition:
+              const CameraPosition(target: LatLng(10.0, 15.0)),
+          onCameraMove: (CameraPosition position) {},
         ),
       ),
     );
@@ -382,5 +382,91 @@ void main() {
     );
 
     expect(platformGoogleMap.myLocationEnabled, true);
+  });
+
+  testWidgets('Can update myLocationButtonEnabled',
+      (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
+          myLocationEnabled: false,
+        ),
+      ),
+    );
+
+    final FakePlatformGoogleMap platformGoogleMap =
+        fakePlatformViewsController.lastCreatedView;
+
+    expect(platformGoogleMap.myLocationButtonEnabled, true);
+
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
+          myLocationButtonEnabled: false,
+        ),
+      ),
+    );
+
+    expect(platformGoogleMap.myLocationButtonEnabled, false);
+  });
+
+  testWidgets('Is default padding 0', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
+        ),
+      ),
+    );
+
+    final FakePlatformGoogleMap platformGoogleMap =
+        fakePlatformViewsController.lastCreatedView;
+
+    expect(platformGoogleMap.padding, <double>[0, 0, 0, 0]);
+  });
+
+  testWidgets('Can update padding', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
+        ),
+      ),
+    );
+
+    final FakePlatformGoogleMap platformGoogleMap =
+        fakePlatformViewsController.lastCreatedView;
+
+    expect(platformGoogleMap.padding, <double>[0, 0, 0, 0]);
+
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
+          padding: EdgeInsets.fromLTRB(10, 20, 30, 40),
+        ),
+      ),
+    );
+
+    expect(platformGoogleMap.padding, <double>[20, 10, 40, 30]);
+
+    await tester.pumpWidget(
+      const Directionality(
+        textDirection: TextDirection.ltr,
+        child: GoogleMap(
+          initialCameraPosition: CameraPosition(target: LatLng(10.0, 15.0)),
+          padding: EdgeInsets.fromLTRB(50, 60, 70, 80),
+        ),
+      ),
+    );
+
+    expect(platformGoogleMap.padding, <double>[60, 50, 80, 70]);
   });
 }

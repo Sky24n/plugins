@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #import "FirebaseMessagingPlugin.h"
+#import "UserAgent.h"
 
 #import "Firebase/Firebase.h"
 
@@ -25,6 +26,11 @@
       [[FLTFirebaseMessagingPlugin alloc] initWithChannel:channel];
   [registrar addApplicationDelegate:instance];
   [registrar addMethodCallDelegate:instance channel:channel];
+
+  SEL sel = NSSelectorFromString(@"registerLibrary:withVersion:");
+  if ([FIRApp respondsToSelector:sel]) {
+    [FIRApp performSelector:sel withObject:LIBRARY_NAME withObject:LIBRARY_VERSION];
+  }
 }
 
 - (instancetype)initWithChannel:(FlutterMethodChannel *)channel {
@@ -63,6 +69,7 @@
 
     result(nil);
   } else if ([@"configure" isEqualToString:method]) {
+    [FIRMessaging messaging].shouldEstablishDirectChannel = true;
     [[UIApplication sharedApplication] registerForRemoteNotifications];
     if (_launchNotification != nil) {
       [_channel invokeMethod:@"onLaunch" arguments:_launchNotification];
@@ -98,7 +105,7 @@
       }
     }];
   } else if ([@"autoInitEnabled" isEqualToString:method]) {
-    BOOL *value = [[FIRMessaging messaging] isAutoInitEnabled];
+    BOOL value = [[FIRMessaging messaging] isAutoInitEnabled];
     result([NSNumber numberWithBool:value]);
   } else if ([@"setAutoInitEnabled" isEqualToString:method]) {
     NSNumber *value = call.arguments;
@@ -173,7 +180,7 @@
   [[FIRMessaging messaging] setAPNSToken:deviceToken type:FIRMessagingAPNSTokenTypeProd];
 #endif
 
-  [_channel invokeMethod:@"onToken" arguments:[[FIRInstanceID instanceID] token]];
+  [_channel invokeMethod:@"onToken" arguments:[FIRMessaging messaging].FCMToken];
 }
 
 - (void)application:(UIApplication *)application
@@ -189,6 +196,11 @@
 - (void)messaging:(nonnull FIRMessaging *)messaging
     didReceiveRegistrationToken:(nonnull NSString *)fcmToken {
   [_channel invokeMethod:@"onToken" arguments:fcmToken];
+}
+
+- (void)messaging:(FIRMessaging *)messaging
+    didReceiveMessage:(FIRMessagingRemoteMessage *)remoteMessage {
+  [_channel invokeMethod:@"onMessage" arguments:remoteMessage.appData];
 }
 
 @end

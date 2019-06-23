@@ -6,8 +6,17 @@ part of google_maps_flutter;
 
 typedef void MapCreatedCallback(GoogleMapController controller);
 
+/// Callback that receives updates to the camera position.
+///
+/// This callback is triggered when the platform Google Map
+/// registers a camera movement.
+///
+/// This is used in [GoogleMap.onCameraMove].
+typedef void CameraPositionCallback(CameraPosition position);
+
 class GoogleMap extends StatefulWidget {
   const GoogleMap({
+    Key key,
     @required this.initialCameraPosition,
     this.onMapCreated,
     this.gestureRecognizers,
@@ -19,10 +28,23 @@ class GoogleMap extends StatefulWidget {
     this.scrollGesturesEnabled = true,
     this.zoomGesturesEnabled = true,
     this.tiltGesturesEnabled = true,
-    this.trackCameraPosition = false,
     this.myLocationEnabled = false,
+    this.myLocationButtonEnabled = true,
+
+    /// If no padding is specified default padding will be 0.
+    this.padding = const EdgeInsets.all(0),
+    this.indoorViewEnabled = false,
     this.markers,
-  }) : assert(initialCameraPosition != null);
+    this.polygons,
+    this.polylines,
+    this.circles,
+    this.onCameraMoveStarted,
+    this.onCameraMove,
+    this.onCameraIdle,
+    this.onTap,
+    this.onLongPress,
+  })  : assert(initialCameraPosition != null),
+        super(key: key);
 
   final MapCreatedCallback onMapCreated;
 
@@ -55,11 +77,47 @@ class GoogleMap extends StatefulWidget {
   /// True if the map view should respond to tilt gestures.
   final bool tiltGesturesEnabled;
 
-  /// True if the map view should relay camera move events to Flutter.
-  final bool trackCameraPosition;
+  /// Padding to be set on map. See https://developers.google.com/maps/documentation/android-sdk/map#map_padding for more details.
+  final EdgeInsets padding;
 
-  // Markers to be placed on the map.
+  /// Markers to be placed on the map.
   final Set<Marker> markers;
+
+  /// Polygons to be placed on the map.
+  final Set<Polygon> polygons;
+
+  /// Polylines to be placed on the map.
+  final Set<Polyline> polylines;
+
+  /// Circles to be placed on the map.
+  final Set<Circle> circles;
+
+  /// Called when the camera starts moving.
+  ///
+  /// This can be initiated by the following:
+  /// 1. Non-gesture animation initiated in response to user actions.
+  ///    For example: zoom buttons, my location button, or marker clicks.
+  /// 2. Programmatically initiated animation.
+  /// 3. Camera motion initiated in response to user gestures on the map.
+  ///    For example: pan, tilt, pinch to zoom, or rotate.
+  final VoidCallback onCameraMoveStarted;
+
+  /// Called repeatedly as the camera continues to move after an
+  /// onCameraMoveStarted call.
+  ///
+  /// This may be called as often as once every frame and should
+  /// not perform expensive operations.
+  final CameraPositionCallback onCameraMove;
+
+  /// Called when camera movement has ended, there are no pending
+  /// animations and the user has stopped interacting with the map.
+  final VoidCallback onCameraIdle;
+
+  /// Called every time a [GoogleMap] is tapped.
+  final ArgumentCallback<LatLng> onTap;
+
+  /// Called every time a [GoogleMap] is long pressed.
+  final ArgumentCallback<LatLng> onLongPress;
 
   /// True if a "My Location" layer should be shown on the map.
   ///
@@ -86,6 +144,22 @@ class GoogleMap extends StatefulWidget {
   /// when the map tries to turn on the My Location layer.
   final bool myLocationEnabled;
 
+  /// Enables or disables the my-location button.
+  ///
+  /// The my-location button causes the camera to move such that the user's
+  /// location is in the center of the map. If the button is enabled, it is
+  /// only shown when the my-location layer is enabled.
+  ///
+  /// By default, the my-location button is enabled (and hence shown when the
+  /// my-location layer is enabled).
+  ///
+  /// See also:
+  ///   * [myLocationEnabled] parameter.
+  final bool myLocationButtonEnabled;
+
+  /// Enables or disables the indoor view from the map
+  final bool indoorViewEnabled;
+
   /// Which gestures should be consumed by the map.
   ///
   /// It is possible for other gesture recognizers to be competing with the map on pointer
@@ -106,6 +180,9 @@ class _GoogleMapState extends State<GoogleMap> {
       Completer<GoogleMapController>();
 
   Map<MarkerId, Marker> _markers = <MarkerId, Marker>{};
+  Map<PolygonId, Polygon> _polygons = <PolygonId, Polygon>{};
+  Map<PolylineId, Polyline> _polylines = <PolylineId, Polyline>{};
+  Map<CircleId, Circle> _circles = <CircleId, Circle>{};
   _GoogleMapOptions _googleMapOptions;
 
   @override
@@ -114,6 +191,9 @@ class _GoogleMapState extends State<GoogleMap> {
       'initialCameraPosition': widget.initialCameraPosition?._toMap(),
       'options': _googleMapOptions.toMap(),
       'markersToAdd': _serializeMarkerSet(widget.markers),
+      'polygonsToAdd': _serializePolygonSet(widget.polygons),
+      'polylinesToAdd': _serializePolylineSet(widget.polylines),
+      'circlesToAdd': _serializeCircleSet(widget.circles),
     };
     if (defaultTargetPlatform == TargetPlatform.android) {
       return AndroidView(
@@ -142,6 +222,9 @@ class _GoogleMapState extends State<GoogleMap> {
     super.initState();
     _googleMapOptions = _GoogleMapOptions.fromWidget(widget);
     _markers = _keyByMarkerId(widget.markers);
+    _polygons = _keyByPolygonId(widget.polygons);
+    _polylines = _keyByPolylineId(widget.polylines);
+    _circles = _keyByCircleId(widget.circles);
   }
 
   @override
@@ -149,6 +232,9 @@ class _GoogleMapState extends State<GoogleMap> {
     super.didUpdateWidget(oldWidget);
     _updateOptions();
     _updateMarkers();
+    _updatePolygons();
+    _updatePolylines();
+    _updateCircles();
   }
 
   void _updateOptions() async {
@@ -170,6 +256,27 @@ class _GoogleMapState extends State<GoogleMap> {
     _markers = _keyByMarkerId(widget.markers);
   }
 
+  void _updatePolygons() async {
+    final GoogleMapController controller = await _controller.future;
+    controller._updatePolygons(
+        _PolygonUpdates.from(_polygons.values.toSet(), widget.polygons));
+    _polygons = _keyByPolygonId(widget.polygons);
+  }
+
+  void _updatePolylines() async {
+    final GoogleMapController controller = await _controller.future;
+    controller._updatePolylines(
+        _PolylineUpdates.from(_polylines.values.toSet(), widget.polylines));
+    _polylines = _keyByPolylineId(widget.polylines);
+  }
+
+  void _updateCircles() async {
+    final GoogleMapController controller = await _controller.future;
+    controller._updateCircles(
+        _CircleUpdates.from(_circles.values.toSet(), widget.circles));
+    _circles = _keyByCircleId(widget.circles);
+  }
+
   Future<void> onPlatformViewCreated(int id) async {
     final GoogleMapController controller = await GoogleMapController.init(
       id,
@@ -185,13 +292,51 @@ class _GoogleMapState extends State<GoogleMap> {
   void onMarkerTap(String markerIdParam) {
     assert(markerIdParam != null);
     final MarkerId markerId = MarkerId(markerIdParam);
-    _markers[markerId].onTap();
+    if (_markers[markerId]?.onTap != null) {
+      _markers[markerId].onTap();
+    }
+  }
+
+  void onPolygonTap(String polygonIdParam) {
+    assert(polygonIdParam != null);
+    final PolygonId polygonId = PolygonId(polygonIdParam);
+    _polygons[polygonId].onTap();
+  }
+
+  void onPolylineTap(String polylineIdParam) {
+    assert(polylineIdParam != null);
+    final PolylineId polylineId = PolylineId(polylineIdParam);
+    if (_polylines[polylineId]?.onTap != null) {
+      _polylines[polylineId].onTap();
+    }
+  }
+
+  void onCircleTap(String circleIdParam) {
+    assert(circleIdParam != null);
+    final CircleId circleId = CircleId(circleIdParam);
+    _circles[circleId].onTap();
   }
 
   void onInfoWindowTap(String markerIdParam) {
     assert(markerIdParam != null);
     final MarkerId markerId = MarkerId(markerIdParam);
-    _markers[markerId].infoWindow.onTap();
+    if (_markers[markerId]?.infoWindow?.onTap != null) {
+      _markers[markerId].infoWindow.onTap();
+    }
+  }
+
+  void onTap(LatLng position) {
+    assert(position != null);
+    if (widget.onTap != null) {
+      widget.onTap(position);
+    }
+  }
+
+  void onLongPress(LatLng position) {
+    assert(position != null);
+    if (widget.onLongPress != null) {
+      widget.onLongPress(position);
+    }
   }
 }
 
@@ -211,6 +356,9 @@ class _GoogleMapOptions {
     this.trackCameraPosition,
     this.zoomGesturesEnabled,
     this.myLocationEnabled,
+    this.myLocationButtonEnabled,
+    this.padding,
+    this.indoorViewEnabled,
   });
 
   static _GoogleMapOptions fromWidget(GoogleMap map) {
@@ -222,9 +370,12 @@ class _GoogleMapOptions {
       rotateGesturesEnabled: map.rotateGesturesEnabled,
       scrollGesturesEnabled: map.scrollGesturesEnabled,
       tiltGesturesEnabled: map.tiltGesturesEnabled,
-      trackCameraPosition: map.trackCameraPosition,
+      trackCameraPosition: map.onCameraMove != null,
       zoomGesturesEnabled: map.zoomGesturesEnabled,
       myLocationEnabled: map.myLocationEnabled,
+      myLocationButtonEnabled: map.myLocationButtonEnabled,
+      padding: map.padding,
+      indoorViewEnabled: map.indoorViewEnabled,
     );
   }
 
@@ -248,6 +399,12 @@ class _GoogleMapOptions {
 
   final bool myLocationEnabled;
 
+  final bool myLocationButtonEnabled;
+
+  final EdgeInsets padding;
+
+  final bool indoorViewEnabled;
+
   Map<String, dynamic> toMap() {
     final Map<String, dynamic> optionsMap = <String, dynamic>{};
 
@@ -267,7 +424,14 @@ class _GoogleMapOptions {
     addIfNonNull('zoomGesturesEnabled', zoomGesturesEnabled);
     addIfNonNull('trackCameraPosition', trackCameraPosition);
     addIfNonNull('myLocationEnabled', myLocationEnabled);
-
+    addIfNonNull('myLocationButtonEnabled', myLocationButtonEnabled);
+    addIfNonNull('padding', <double>[
+      padding?.top,
+      padding?.left,
+      padding?.bottom,
+      padding?.right,
+    ]);
+    addIfNonNull('indoorEnabled', indoorViewEnabled);
     return optionsMap;
   }
 
